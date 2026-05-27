@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CJU Forum | 清州大学社区</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;700;900&family=Noto+Sans+KR:wght@300;400;700;900&display=swap" rel="stylesheet">
+    <style>
+        [v-cloak] { display: none; }
+        body { font-family: 'Noto Sans SC', 'Noto Sans KR', sans-serif; background-color: #f3f4f6; }
+        .cju-red { color: #b91c1c; }
+        .bg-cju-red { background-color: #b91c1c; }
+        .glass-nav { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(0,0,0,0.05); }
+        .post-card { transition: all 0.3s ease; border: 1px solid rgba(0,0,0,0.05); }
+        .post-card:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
+        .zoom-layer { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 9999; display: flex; align-items: center; justify-content: center; cursor: zoom-out; animation: fadeIn 0.2s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        /* 隐藏滚动条 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="antialiased">
+
+<div id="app" v-cloak>
+    <!-- 1. 顶部导航栏 -->
+    <nav class="glass-nav fixed top-0 w-full z-40">
+        <div class="container mx-auto max-w-7xl px-4 h-16 flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <span class="text-3xl font-black italic tracking-tighter bg-cju-red text-white px-2 py-0.5 rounded shadow-lg">CJU</span>
+                <span class="text-sm font-bold tracking-tight hidden md:block ml-2 text-gray-700 uppercase">{{ t.forumTitle }}</span>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <!-- 语言切换 -->
+                <div class="flex bg-gray-100 p-1 rounded-xl">
+                    <button v-for="l in ['zh','en','ko']" @click="lang = l" 
+                            :class="['px-3 py-1 rounded-lg text-[10px] font-bold transition-all', lang === l ? 'bg-white text-red-700 shadow-sm' : 'text-gray-400']">
+                        {{ l.toUpperCase() }}
+                    </button>
+                </div>
+                <!-- 用户状态 -->
+                <div v-if="user" class="flex items-center gap-2">
+                    <div class="hidden sm:block text-right">
+                        <p class="text-[10px] font-bold text-gray-800 leading-none">{{ user.email.split('@')[0] }}</p>
+                        <button @click="handleLogout" class="text-[9px] text-gray-400 hover:text-red-600 transition underline uppercase">{{ t.logout }}</button>
+                    </div>
+                    <div class="w-9 h-9 rounded-full bg-gradient-to-br from-red-600 to-red-400 border-2 border-white shadow-md flex items-center justify-center text-white font-bold">
+                        {{ user.email[0].toUpperCase() }}
+                    </div>
+                </div>
+                <button v-else @click="showAuthModal = true" class="bg-cju-red text-white px-6 py-2 rounded-full font-bold text-xs shadow-lg shadow-red-200 hover:bg-black transition-all">
+                    LOGIN
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 2. 主页面布局 -->
+    <div class="container mx-auto max-w-7xl px-4 pt-24 pb-12">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            
+            <!-- 【左栏】：用户信息 & 导航 (大屏显示) -->
+            <aside class="hidden lg:block lg:col-span-3">
+                <div class="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 sticky top-24 text-center">
+                    <div v-if="user">
+                        <div class="w-20 h-20 rounded-full bg-red-50 mx-auto mb-4 flex items-center justify-center text-3xl shadow-inner border border-red-100">🎓</div>
+                        <h3 class="font-black text-gray-800 mb-1 tracking-tight">{{ user.email.split('@')[0] }}</h3>
+                        <p class="text-xs text-gray-400 mb-6">Cheongju Univ. Student</p>
+                        <div class="grid grid-cols-2 gap-2 border-t pt-6">
+                            <div class="text-center"><p class="text-lg font-bold text-gray-800">{{ posts.length }}</p><p class="text-[10px] text-gray-400 uppercase font-bold">{{ t.postsCount }}</p></div>
+                            <div class="text-center"><p class="text-lg font-bold text-gray-800">CJU</p><p class="text-[10px] text-gray-400 uppercase font-bold">Campus</p></div>
+                        </div>
+                    </div>
+                    <div v-else>
+                        <p class="text-sm text-gray-400 mb-4">{{ t.joinPrompt }}</p>
+                        <button @click="showAuthModal = true" class="w-full bg-gray-900 text-white py-3 rounded-2xl font-bold text-xs">JOIN COMMUNITY</button>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- 【中栏】：主动态流 -->
+            <main class="lg:col-span-6 space-y-6">
+                <!-- 移动端分类导航 (横向滑动) -->
+                <div class="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+                    <button v-for="cat in ['all','study','gaming','market','food']" @click="activeCat = cat"
+                            :class="['px-6 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all border', activeCat === cat ? 'bg-cju-red text-white border-red-600 shadow-md' : 'bg-white text-gray-400 border-gray-100 hover:bg-gray-50']">
+                        {{ t[cat] }}
+                    </button>
+                </div>
+
+                <!-- 发帖入口 (卡片式) -->
+                <div v-if="user" class="bg-white rounded-3xl shadow-sm p-6 border border-gray-100">
+                    <div class="flex gap-4 mb-4">
+                        <input v-model="newPost.title" :placeholder="t.phTitle" class="flex-1 bg-gray-50 border-none rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-red-100 outline-none">
+                        <select v-model="newPost.rating" class="bg-gray-50 rounded-2xl px-4 text-yellow-500 font-bold border-none outline-none">
+                            <option v-for="n in 5" :value="6-n">{{ '⭐'.repeat(6-n) }}</option>
+                        </select>
+                    </div>
+                    <textarea v-model="newPost.content" :placeholder="t.phContent" class="w-full bg-gray-50 border-none rounded-2xl p-4 text-sm focus:ring-2 focus:ring-red-100 outline-none h-24 mb-4 resize-none"></textarea>
+                    
+                    <div class="flex justify-between items-center">
+                        <label class="cursor-pointer bg-gray-50 hover:bg-gray-100 text-gray-500 px-4 py-2 rounded-xl border border-gray-100 transition text-[10px] font-bold">
+                            📷 {{ selectedFile ? t.changeImg : t.uploadImg }}
+                            <input type="file" @change="onFileSelected" accept="image/*" class="hidden">
+                        </label>
+                        <button @click="submitPost" :disabled="submitting" class="bg-cju-red text-white px-10 py-2.5 rounded-2xl font-black text-sm shadow-xl shadow-red-50 disabled:opacity-50 hover:bg-black transition-all">
+                            {{ submitting ? '...' : t.postBtn }}
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 帖子列表 -->
+                <div v-if="loading" class="text-center py-20"><div class="w-8 h-8 border-4 border-red-200 border-t-red-600 rounded-full animate-spin mx-auto"></div></div>
+                
+                <div class="space-y-8">
+                    <div v-for="post in filteredPosts" :key="post.id" class="post-card bg-white rounded-[2rem] overflow-hidden shadow-sm">
+                        <!-- 图片：全屏灯箱逻辑 -->
+                        <div v-if="post.image_url" class="w-full bg-gray-100 relative group cursor-zoom-in">
+                            <img :src="post.image_url" @click="zoomedImg = post.image_url" class="w-full h-auto max-h-[500px] object-contain mx-auto">
+                        </div>
+
+                        <div class="p-8">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="text-[10px] font-black text-red-600 uppercase tracking-widest">{{ post.category }}</span>
+                                <div class="flex text-yellow-400 text-[10px]">
+                                    <span v-for="i in post.rating">★</span>
+                                </div>
+                            </div>
+                            <h2 class="text-2xl font-black text-gray-900 mb-4 tracking-tight leading-tight">{{ post.title }}</h2>
+                            <p class="text-gray-600 leading-relaxed mb-6 text-sm whitespace-pre-wrap">{{ post.content }}</p>
+                            
+                            <div class="flex justify-between items-center border-t border-gray-50 pt-6">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-xs font-black text-gray-700 uppercase italic">@{{ post.author }}</span>
+                                    <!-- 🗑️ 删除按钮 (本人可见) -->
+                                    <button v-if="user && (String(post.user_id) === String(user.id))" 
+                                            @click="handleDelete(post.id)"
+                                            class="text-gray-300 hover:text-red-600 transition text-[10px] font-bold tracking-widest ml-4 uppercase">
+                                        [ {{ t.delete }} ]
+                                    </button>
+                                </div>
+                                <span class="text-[10px] text-gray-300 font-mono">{{ formatDate(post.created_at) }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <!-- 【右栏】：校园公告 & 资讯 -->
+            <aside class="hidden lg:block lg:col-span-3">
+                <div class="space-y-6 sticky top-24">
+                    <div class="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
+                        <h3 class="font-black text-gray-900 text-xs uppercase tracking-widest mb-4 border-l-4 border-red-600 pl-2">{{ t.notice }}</h3>
+                        <div class="space-y-4">
+                            <div class="group cursor-pointer">
+                                <p class="text-xs font-bold text-gray-800 group-hover:text-red-600 transition">清州大学 2026 秋季选课指南公开</p>
+                                <p class="text-[9px] text-gray-400 mt-1">2026.05.20</p>
+                            </div>
+                            <div class="group cursor-pointer border-t pt-4">
+                                <p class="text-xs font-bold text-gray-800 group-hover:text-red-600 transition">校内图书馆开放时间调整通知</p>
+                                <p class="text-[9px] text-gray-400 mt-1">2026.05.18</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 快捷帮助 -->
+                    <div class="bg-gray-900 text-white rounded-3xl p-6 shadow-lg">
+                        <p class="text-xs font-bold mb-2">Need Help? 🆘</p>
+                        <p class="text-[10px] text-gray-400 leading-relaxed">遇到任何问题或BUG，请通过邮箱联系管理员：admin@cju.ac.kr</p>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- 3. 图片全屏层 -->
+    <transition name="fade">
+        <div v-if="zoomedImg" @click="zoomedImg = null" class="zoom-layer fixed inset-0 flex items-center justify-center p-4">
+            <img :src="zoomedImg" class="max-w-full max-h-full object-contain rounded-xl shadow-2xl">
+            <div class="absolute top-8 right-8 text-white text-3xl font-light">✕</div>
+        </div>
+    </transition>
+
+    <!-- 4. 登录弹窗 (CJU 风格) -->
+    <div v-if="showAuthModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[100] p-4">
+        <div class="bg-white rounded-[3rem] p-10 w-full max-w-sm shadow-2xl relative">
+            <button @click="showAuthModal = false" class="absolute top-8 right-8 text-gray-300 hover:text-gray-900 text-2xl font-light transition">✕</button>
+            <h2 class="text-4xl font-black text-gray-900 mb-2 text-center tracking-tighter italic">CJU</h2>
+            <p class="text-center text-[10px] text-gray-400 mb-10 font-bold tracking-[0.3em] uppercase">Campus Community</p>
+            <div class="space-y-4">
+                <input v-model="authEmail" type="email" placeholder="CJU Email" class="w-full bg-gray-50 rounded-2xl p-4 outline-none focus:ring-2 focus:ring-red-100 border-none text-sm font-medium">
+                <input v-model="authPassword" type="password" placeholder="Password" class="w-full bg-gray-50 rounded-2xl p-4 outline-none focus:ring-2 focus:ring-red-100 border-none text-sm font-medium">
+                <button @click="handleAuth" :disabled="authLoading" class="w-full bg-cju-red text-white py-4 rounded-3xl font-black shadow-2xl shadow-red-100 uppercase tracking-widest mt-4 hover:bg-black transition">
+                    {{ authLoading ? '...' : (isLoginMode ? t.loginBtn : t.regBtn) }}
+                </button>
+                <p @click="isLoginMode = !isLoginMode" class="text-center text-[10px] text-gray-400 cursor-pointer hover:text-red-700 font-bold transition uppercase tracking-widest mt-6">
+                    {{ isLoginMode ? t.noAcc : t.hasAcc }}
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted } = Vue;
+
+// 1. 初始化 Supabase
+const SB_URL = 'https://vfnuypauxharebzwhqwk.supabase.co'; 
+const SB_KEY = 'sb_publishable_ljFsseRgEUHko0AEpMOb6Q_g8IRPVd0'; 
+const client = supabase.createClient(SB_URL, SB_KEY);
+
+createApp({
+    setup() {
+        const lang = ref('zh');
+        const user = ref(null);
+        const posts = ref([]);
+        const loading = ref(true);
+        const submitting = ref(false);
+        const activeCat = ref('all');
+        const zoomedImg = ref(null);
+        const showAuthModal = ref(false);
+        const isLoginMode = ref(true);
+        const authEmail = ref('');
+        const authPassword = ref('');
+        const authLoading = ref(false);
+        const selectedFile = ref(null);
+        const newPost = ref({ title: '', content: '', category: 'study', rating: 5 });
+
+        // 🟢 语言系统：计算属性，解决语言失效
+        const t = computed(() => {
+            const dict = {
+                zh: { forumTitle: '校园论坛', all: '全部', study: '学习', gaming: '游戏', market: '二手', food: '美食', logout: '退出登录', login: '登录', postBtn: '发布动态', phTitle: '起个标题...', phContent: '今天在清大有什么好发现？', uploadImg: '选图', changeImg: '换图', loginToPost: '登录后分享清大生活', postsCount: '发布', joinPrompt: '加入清大社区', notice: '校园公告', loginBtn: '登录', regBtn: '注册', noAcc: '没有账号？去注册', hasAcc: '已有账号？去登录', delete: '删除' },
+                en: { forumTitle: 'Campus Forum', all: 'All', study: 'Study', gaming: 'Gaming', market: 'Market', food: 'Food', logout: 'Logout', login: 'Login', postBtn: 'Post Now', phTitle: 'Post Title...', phContent: 'What is happening in CJU?', uploadImg: 'Add Image', changeImg: 'Change', loginToPost: 'Login to post your moments', postsCount: 'Posts', joinPrompt: 'Join CJU community', notice: 'CJU NOTICE', loginBtn: 'Login', regBtn: 'Sign Up', noAcc: "Don't have account?", hasAcc: 'Already have account?', delete: 'Delete' },
+                ko: { forumTitle: '캠퍼스 커뮤니티', all: '전체글', study: '학업', gaming: '게임', market: '중고장터', food: '맛집', logout: '로그아웃', login: '로그인', postBtn: '작성하기', phTitle: '제목을 입력하세요', phContent: '청주대에서의 일상을 공유하세요', uploadImg: '사진 추가', changeImg: '사진 변경', loginToPost: '로그인 후 이용 가능합니다', postsCount: '게시글', joinPrompt: '커뮤니티 가입하기', notice: '공지사항', loginBtn: '로그인', regBtn: '가입하기', noAcc: '계정이 없으신가요?', hasAcc: '계정이 있으신가요?', delete: '삭제' }
+            };
+            return dict[lang.value];
+        });
+
+        const fetchPosts = async () => {
+            loading.value = true;
+            const { data } = await client.from('posts').select('*').order('created_at', { ascending: false });
+            posts.value = data || [];
+            loading.value = false;
+        };
+
+        const submitPost = async () => {
+            if (!newPost.value.title || !newPost.value.content) return;
+            submitting.value = true;
+            try {
+                let imgUrl = null;
+                if (selectedFile.value) {
+                    const name = `${Date.now()}.png`;
+                    await client.storage.from('forum-images').upload(name, selectedFile.value);
+                    const { data } = client.storage.from('forum-images').getPublicUrl(name);
+                    imgUrl = data.publicUrl;
+                }
+                await client.from('posts').insert([{
+                    ...newPost.value, image_url: imgUrl,
+                    author: user.value.email.split('@')[0],
+                    user_id: user.value.id
+                }]);
+                newPost.value = { title: '', content: '', category: 'study', rating: 5 };
+                selectedFile.value = null;
+                await fetchPosts();
+            } finally { submitting.value = false; }
+        };
+
+        const handleDelete = async (id) => {
+            if (!confirm(t.value.delete + "?")) return;
+            await client.from('posts').delete().eq('id', id);
+            fetchPosts();
+        };
+
+        const handleAuth = async () => {
+            authLoading.value = true;
+            let res = isLoginMode.value 
+                ? await client.auth.signInWithPassword({ email: authEmail.value, password: authPassword.value })
+                : await client.auth.signUp({ email: authEmail.value, password: authPassword.value });
+            if (res.error) alert(res.error.message);
+            else { 
+                if (!isLoginMode.value) alert("Check email!"); 
+                user.value = res.data.user;
+                showAuthModal.value = false; 
+            }
+            authLoading.value = false;
+        };
+
+        const handleLogout = async () => { await client.auth.signOut(); user.value = null; };
+        const onFileSelected = (e) => { selectedFile.value = e.target.files[0]; };
+        const formatDate = (s) => { const d = new Date(s); return `${d.getMonth()+1}.${d.getDate()} ${d.getHours()}:${d.getMinutes().toString().padStart(2,'0')}`; };
+
+        onMounted(async () => {
+            const { data: { user: u } } = await client.auth.getUser();
+            user.value = u;
+            client.auth.onAuthStateChange((_, s) => user.value = s?.user || null);
+            fetchPosts();
+        });
+
+        const filteredPosts = computed(() => {
+            if (activeCat.value === 'all') return posts.value;
+            return posts.value.filter(p => p.category === activeCat.value);
+        });
+
+        return { lang, t, user, posts, loading, newPost, submitting, showAuthModal, isLoginMode, authEmail, authPassword, authLoading, zoomedImg, activeCat, submitPost, handleAuth, handleLogout, onFileSelected, selectedFile, handleDelete, filteredPosts, formatDate };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
